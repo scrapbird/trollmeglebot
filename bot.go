@@ -4,12 +4,13 @@ import (
 	"fmt"
 	"container/list"
 	"strings"
-	"github.com/scrapbird/go-ircevent"
+
+	irc "github.com/fluffle/goirc/client"
 )
 
 var (
 	serverAddress = "irc.uniirc.com:6667"
-	nick = "trollmeglee"
+	nick = "trollmegle"
 	name = "trollmegle"
 	channel = "#trollmegle"
 
@@ -19,28 +20,58 @@ var (
 )
 
 func main () {
-	ircConn := irc.IRC (nick, name)
-	ircConn.Debug = true
+	ircConn := irc.SimpleClient (nick)
 
 	// add callbacks
-	ircConn.AddCallback("001", func(event *irc.Event) {
-		ircConn.Join(channel)
+	ircConn.AddHandler (irc.CONNECTED, func (conn *irc.Conn, line *irc.Line) {
+		conn.Join (channel)
 	})
 
-	ircConn.AddCallback("JOIN", func (event *irc.Event) {
-		fmt.Println (event.Message ())
-		ircConn.Privmsg (event.Nick, "Welcome to trollmegle, to join the game please type '" + commandPrefix + "join'")
+	// And a signal on disconnect
+	quit := make(chan bool)
+	ircConn.AddHandler(irc.DISCONNECTED, func(conn *irc.Conn, line *irc.Line) {
+		quit <- true
+	})
+
+	ircConn.AddHandler ("JOIN", func (conn *irc.Conn, line *irc.Line) {
+		fmt.Println (line.Raw)
+		conn.Privmsg (line.Nick, "Welcome to trollmegle, to join the game please type '" + commandPrefix + "join'")
 	});
 
-	ircConn.AddCallback("PRIVMSG", func (event *irc.Event) {
-		fmt.Println (event.Message ())
-		if strings.HasPrefix (event.Message (), commandPrefix) {
+	// part / quit callback
+	pqCallback := func (conn *irc.Conn, line *irc.Line) {
+		fmt.Println (line.Raw)
+		playerElem := findPlayer (line.Nick)
+		if playerElem != nil {
+			players.Remove (playerElem)
+			conn.Privmsg (channel, line.Nick + " has left the game")
+		}
+	}
+	ircConn.AddHandler ("PART", pqCallback);
+	ircConn.AddHandler ("QUIT", pqCallback);
+
+	ircConn.AddHandler ("PRIVMSG", func (conn *irc.Conn, line *irc.Line) {
+		fmt.Println (line.Raw)
+		fmt.Println (line.Args)
+		message := line.Args[1]
+
+		if strings.HasPrefix (message, commandPrefix) {
 			// process this message
-			command := strings.TrimPrefix (event.Message (), commandPrefix)
+			command := strings.TrimPrefix (message, commandPrefix)
 			switch command {
 			case "join":
 				// add user to the game
-				players.PushBack (event.Nick)
+				players.PushBack (line.Nick)
+				ircConn.Privmsg (channel, line.Nick + " has joined the game")
+			case "leave":
+				// remove the user from the game
+				playerElem := findPlayer (line.Nick)
+				if playerElem != nil {
+					players.Remove (playerElem)
+					ircConn.Privmsg (channel, line.Nick + " has left the game")
+				} else {
+					ircConn.Privmsg (line.Nick, "You aren't in the game")
+				}
 			}
 		}
 	});
@@ -59,4 +90,15 @@ func main () {
 	var hammerTime int
 	hammerTime = <- stop
 	fmt.Println (hammerTime)
+}
+
+func findPlayer (nick string) *list.Element {
+	var next *list.Element
+	for e := players.Front (); e != nil; e = next {
+		next = e.Next ()
+		if e.Value == nick {
+			return e
+		}
+	}
+	return nil
 }
