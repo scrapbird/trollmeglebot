@@ -9,7 +9,7 @@ import (
 )
 
 var (
-	serverAddress = "irc.uniirc.com:6667"
+	serverAddress = "130.95.13.18:6667"
 	nick = "trollmegle"
 	name = "trollmegle"
 	channel = "#trollmegle"
@@ -21,6 +21,7 @@ var (
 
 func main () {
 	ircConn := irc.SimpleClient (nick)
+	ircConn.EnableStateTracking ()
 
 	// add callbacks
 	ircConn.AddHandler (irc.CONNECTED, func (conn *irc.Conn, line *irc.Line) {
@@ -86,10 +87,9 @@ func main () {
 	}
 	fmt.Println ("Connected")
 
-	stop := make (chan int)
-	var hammerTime int
-	hammerTime = <- stop
-	fmt.Println (hammerTime)
+	// wait for disconnect
+	<-quit
+	fmt.Println ("Disconnected from irc server")
 }
 
 func findPlayer (nick string) *list.Element {
@@ -102,3 +102,4 @@ func findPlayer (nick string) *list.Element {
 	}
 	return nil
 }
+
