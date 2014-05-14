@@ -10,8 +10,8 @@ import (
 
 var (
 	serverAddress = "130.95.13.18:6667"
-	nick = "trollmegle"
-	name = "trollmegle"
+	nick = "trollmeglebot"
+	name = "trollmeglebot"
 	channel = "#trollmegle"
 
 	commandPrefix = "."
