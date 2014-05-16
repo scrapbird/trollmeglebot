@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"container/list"
 	"strings"
+	"flag"
 
 	omegle "github.com/simon-weber/gomegle"
 	irc "github.com/fluffle/goirc/client"
@@ -12,6 +13,8 @@ import (
 var (
 	serverAddress = "130.95.13.18:6667"
 	nick = "trollmeglebot"
+	aliceNick = "alice|omg"
+	bobNick = "bob|omg"
 	name = "trollmeglebot"
 	channel = "#trollmegle"
 
@@ -19,25 +22,46 @@ var (
 
 	players list.List
 
+	multiIrc bool
 	omegleInit bool
 	omegleAlice, omegleBob *omegle.Session
+	ircAlice, ircBob *irc.Conn
 	ircConn *irc.Conn
+	ircConns [](*irc.Conn)
 )
 
 func main () {
+	// check flags for multi-connect
+	mconnect := flag.Bool ("multi-connect", true, "use or not use multiple irc connections")
+	flag.Parse ()
+	multiIrc = *mconnect
+
 	ircConn = irc.SimpleClient (nick)
-	ircConn.EnableStateTracking ()
 
-	// add callbacks
-	ircConn.AddHandler (irc.CONNECTED, func (conn *irc.Conn, line *irc.Line) {
-		conn.Join (channel)
-	})
-
-	// And a signal on disconnect
+	if multiIrc {
+		ircConns = make([](*irc.Conn), 3)
+		ircAlice = irc.SimpleClient (aliceNick)
+		ircBob = irc.SimpleClient (bobNick)
+		ircConns[0] = ircConn
+		ircConns[1] = ircAlice
+		ircConns[2] = ircBob
+	} else {
+		ircConns = make([](*irc.Conn), 1)
+		ircConns[0] = ircConn
+	}
 	quit := make(chan bool)
-	ircConn.AddHandler(irc.DISCONNECTED, func(conn *irc.Conn, line *irc.Line) {
-		quit <- true
-	})
+	for _, iconn := range ircConns {
+		iconn.EnableStateTracking ()
+		// add callbacks
+		iconn.AddHandler (irc.CONNECTED, func (conn *irc.Conn, line *irc.Line) {
+			conn.Join (channel)
+		})
+
+		// And a signal on disconnect
+		iconn.AddHandler(irc.DISCONNECTED, func(conn *irc.Conn, line *irc.Line) {
+			quit <- true
+		})
+	}
 
 	ircConn.AddHandler ("JOIN", func (conn *irc.Conn, line *irc.Line) {
 		fmt.Println (line.Raw)
@@ -56,18 +80,19 @@ func main () {
 	ircConn.AddHandler ("PART", pqCallback);
 	ircConn.AddHandler ("QUIT", pqCallback);
 
+	// TODO: add handler for ircBob and ircAlice so can privmsg them
 	ircConn.AddHandler ("PRIVMSG", func (conn *irc.Conn, line *irc.Line) {
 		fmt.Println (line.Raw)
 		fmt.Println (line.Args)
 		message := line.Args[1]
 
-		if strings.HasPrefix (message, "a: ") {
-			message := strings.TrimPrefix (message, "a: ")
+		if strings.HasPrefix (message, bobNick + ": ") {
+			message := strings.TrimPrefix (message, bobNick + ": ")
 			if omegleInit {
 				omegleBob.Message (message)
 			}
-		} else if strings.HasPrefix (message, "b: ") {
-			message := strings.TrimPrefix (message, "b: ")
+		} else if strings.HasPrefix (message, aliceNick + ": ") {
+			message := strings.TrimPrefix (message, aliceNick + ": ")
 			if omegleInit {
 				omegleAlice.Message (message)
 			}
@@ -105,11 +130,13 @@ func main () {
 
 	// connect to the network
 	fmt.Println ("Attempting to connect to ", serverAddress)
-	err := ircConn.Connect (serverAddress)
-	if err != nil {
-		fmt.Println ("Error connecting to irc network")
-		fmt.Println (err.Error ())
-		return
+	for _, iconn := range ircConns {
+		err := iconn.Connect (serverAddress)
+		if err != nil {
+			fmt.Println ("Error connecting to irc network")
+			fmt.Println (err.Error ())
+			return
+		}
 	}
 	fmt.Println ("Connected")
 
@@ -165,11 +192,20 @@ func listenForEvents (events chan *omegle.Event, who string) {
 		} else if event.Kind == "gotMessage" {
 			if who == "Alice" {
 				omegleBob.Message (event.Value)
+				if(multiIrc) {
+					ircAlice.Privmsg (channel, event.Value)
+				} else {
+					ircConn.Privmsg (channel, who + ": " + event.Value)
+				}
 			} else {
 				omegleAlice.Message (event.Value)
+				if(multiIrc) {
+					ircBob.Privmsg (channel, event.Value)
+				} else {
+					ircConn.Privmsg (channel, who + ": " + event.Value)
+				}
 			}
 			fmt.Println (who + ": " + event.Value)
-			ircConn.Privmsg (channel, who + ": " + event.Value)
 		} else if event.Kind == "strangerDisconnected" {
 			ircConn.Privmsg (channel, who + " disconnected")
 		}
